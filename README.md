@@ -2665,7 +2665,7 @@ output_schema 如果不设定，那么最终invoke的输出就是全局state
 
 常用的多智能体架构如下图所示，接下来我将一一介绍
 
-![image-20251016142911013](/Users/zmh/Desktop/program/md/image-20251016142911013_副本.png)
+![image-20251016142911013](image-20251016142911013_副本.png)
 
 ##### Network-网络架构（Swarm-鸟群架构）
 
@@ -2790,7 +2790,7 @@ if __name__ == "__main__":
 
 
 
-![](/Users/zmh/Desktop/program/md/Network_workflow_graph.png)
+![](Network_workflow_graph.png)
 
 
 
