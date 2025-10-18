@@ -2661,6 +2661,183 @@ output_schema 如果不设定，那么最终invoke的输出就是全局state
   )
   ```
 
+#### 子图
+
+##### 概念
+
+子图是用作另一个图中的[节点](https://langchain-ai.github.io/langgraph/concepts/low_level/#nodes)的[图 ](https://langchain-ai.github.io/langgraph/concepts/low_level/#graphs)——这是应用于 LangGraph 的封装概念。子图允许您构建具有多个组件的复杂系统，这些组件本身就是图。
+
+##### 优势
+
+- 构建[多智能体系统](https://langchain-ai.github.io/langgraph/concepts/multi_agent/)
+- 当你想在多个图表中重用一组节点时
+- 当你希望不同的团队独立地处理图的不同部分时，你可以将每个部分定义为一个子图，只要尊重子图接口（输入和输出模式），就可以在不知道子图的任何细节的情况下构建父图
+
+##### 构建方法
+
+###### 子图与主图存在共享状态
+
+当主图和子图存在共享状态那么子图可以直接作为节点出现在子图
+
+```
+from typing_extensions import TypedDict
+from langgraph.graph.state import StateGraph, START
+
+class State(TypedDict):
+    foo: str
+
+# Subgraph
+
+def subgraph_node_1(state: State):
+    return {"foo": "hi! " + state["foo"]}
+
+subgraph_builder = StateGraph(State)
+subgraph_builder.add_node(subgraph_node_1)
+subgraph_builder.add_edge(START, "subgraph_node_1")
+subgraph = subgraph_builder.compile()
+
+# Parent graph
+
+builder = StateGraph(State)
+builder.add_node("node_1", subgraph)#可以看到是直接添加为节点
+builder.add_edge(START, "node_1")
+graph = builder.compile()
+```
+
+###### 当主图和子图不存在共享状态
+
+当主图和子图不存在共享状态那么就必须封装一个函数在函数里面调用子图然后再将函数封装为节点
+
+```
+from typing_extensions import TypedDict
+from langgraph.graph.state import StateGraph, START
+
+class SubgraphState(TypedDict):
+    bar: str
+
+# Subgraph
+
+def subgraph_node_1(state: SubgraphState):
+    return {"bar": "hi! " + state["bar"]}
+
+subgraph_builder = StateGraph(SubgraphState)
+subgraph_builder.add_node(subgraph_node_1)
+subgraph_builder.add_edge(START, "subgraph_node_1")
+subgraph = subgraph_builder.compile()
+
+# Parent graph
+
+class State(TypedDict):
+    foo: str
+
+def call_subgraph(state: State):
+    subgraph_output = subgraph.invoke({"bar": state["foo"]})  
+    return {"foo": subgraph_output["bar"]}  
+
+builder = StateGraph(State)
+builder.add_node("node_1", call_subgraph)
+builder.add_edge(START, "node_1")
+graph = builder.compile()
+```
+
+##### 数据传输
+
+###### 主图如何将状态传入子图
+
+子图会从主图的state中挑选input_schema对应的value（之前状态模块已经讲过了）
+
+###### 子图如何将状态传给主图
+
+子图会将最终节点输出的状态用来更新主图状态
+
+如果未设定out_shema那么最终输出的状态就是子图的状态，那么所有与主图共享的状态全部会被更新
+
+如果设定out_shema那么最终输出的状态是你规定的状态，只有与你规定的输出中相同的状态才会被更新
+
+```
+from typing_extensions import TypedDict
+from langgraph.graph import StateGraph, START, END
+from typing import List
+
+# 主图状态
+class State(TypedDict):
+    foo: str
+    history: List[str]  # 用于记录状态更新历史
+    result: str
+
+# 子图状态（扩展了主图状态）
+class SubgraphState(TypedDict):
+    foo: str
+    sub_history: List[str]
+    result: str  # 额外字段
+class subout(TypedDict):
+    result:str
+
+# 子图节点
+def subgraph_node_1(state: State) -> SubgraphState:
+    
+    new_foo = "hi! " + state["foo"]
+    state["history"].append(f"子图节点1: 将 foo 更新为 {new_foo}")
+    state["result"] = f"子图处理结果: {new_foo}"
+    return {"foo": new_foo, "sub_history": state["history"], "result": state["result"]}
+
+# 创建子图
+subgraph_builder = StateGraph(SubgraphState,input_schema=State)
+subgraph_builder.add_node("subgraph_node_1", subgraph_node_1)
+subgraph_builder.add_edge(START, "subgraph_node_1")
+subgraph_builder.add_edge("subgraph_node_1", END)
+subgraph = subgraph_builder.compile()
+
+# 主图节点（在子图后处理状态）
+def main_node_2(state: State) -> State:
+    print('result',state["result"])
+    print('foo',state["foo"])
+    state["history"].append(f"主图节点2: 收到 foo={state['foo']}, result={state['result']}")
+    state["result"] = f"主图最终结果: {state['foo']}"
+    return state
+
+# 创建主图
+builder = StateGraph(State)
+builder.add_node("node_1", subgraph)  # 直接将子图作为节点
+builder.add_node("node_2", main_node_2)
+builder.add_edge(START, "node_1")
+builder.add_edge("node_1", "node_2")
+builder.add_edge("node_2", END)
+graph = builder.compile()
+
+# 主函数
+def main():
+    # 初始化主图状态
+    initial_state = State(
+        foo="初始任务",
+        history=[],
+        result=""
+    )
+    # 执行主图
+    final_state = graph.invoke(initial_state)
+    
+
+if __name__ == "__main__":
+    main()
+```
+
+```
+#当我未设定out_schema对应的输出：
+
+result 子图处理结果: hi! 初始任务
+foo hi! 初始任务
+
+#可以看到 foo 和result全部被更新
+#当设定了 output_schema=subout
+
+result 子图处理结果: hi! 初始任务
+foo 初始任务
+
+#在子图中更新的foo 并没有传入子图用于更新状态
+```
+
+
+
 #### 多智能体架构
 
 常用的多智能体架构如下图所示，接下来我将一一介绍
@@ -2849,9 +3026,109 @@ Next: END
 
 ##### Supervisor架构
 
-中心化智能体架构,通过一个中心路由连接所有智能体进行智能分配
+中心化智能体架构,通过一个中心路由连接所有智能体进行智能分配。
+
+该架构的可拓展性强，如果要添加智能体直接连接中心智能体即可。
+
+该架构适用于子智能体规模较小且互相无关联性。
+
+**代码实例**
+
+```python
+from langgraph.graph import StateGraph, END
+from typing import TypedDict, List, Dict, Any
+import random
+
+#代码重点展示架构
+# 定义状态类，用于在代理之间传递信息
+class AgentState(TypedDict):
+    task: str
+    current_agent: str
+    history: List[str]
+    result: str
+
+
+# 工作代理1：处理文本分析任务
+def text_analysis_agent(state: AgentState) -> AgentState:
+    state["history"].append(f"文本分析代理处理任务: {state['task']}")
+    state["result"] = f"已完成文本分析: {state['task']}"
+    state["current_agent"] = "supervisor"
+    return state
+
+
+# 工作代理2：处理数据处理任务
+def data_processing_agent(state: AgentState) -> AgentState:
+    state["history"].append(f"数据处理代理处理任务: {state['task']}")
+    state["result"] = f"已完成数据处理: {state['task']}"
+    state["current_agent"] = "supervisor"
+    return state
+
+
+# 主管代理：决定下一个要调用的代理
+def supervisor_agent(state: AgentState) -> AgentState:
+    state["history"].append(f"主管代理收到任务: {state['task']}")
+
+    # 模拟决策逻辑：根据任务内容选择代理
+    if "文本" in state["task"]:
+        state["current_agent"] = "text_analysis"
+    elif "数据" in state["task"]:
+        state["current_agent"] = "data_processing"
+    else:
+        # 如果任务处理完成，结束流程
+        state["current_agent"] = END
+        state["result"] = f"任务完成: {state['task']}"
+
+    return state
+
+
+# 创建状态图
+def create_graph():
+    graph = StateGraph(AgentState)
+
+    # 添加节点
+    graph.add_node("supervisor", supervisor_agent)
+    graph.add_node("text_analysis", text_analysis_agent)
+    graph.add_node("data_processing", data_processing_agent)
+
+    # 设置入口点
+    graph.set_entry_point("supervisor")
+
+    # 添加条件边
+    graph.add_conditional_edges(
+        "supervisor",
+        lambda state: state["current_agent"],
+        {
+            "text_analysis": "text_analysis",
+            "data_processing": "data_processing",
+            END: END
+        }
+    )
+
+    # 添加从工作代理返回到主管的边
+    graph.add_edge("text_analysis", "supervisor")
+    graph.add_edge("data_processing", "supervisor")
+
+    return graph.compile()
+```
+
+**架构流程图**
+
+
+
+![](Supervisor_workflow_graph.png)
 
 
 
 
 
+##### Supervisor (tool-calling):
+
+这是 Supervisor 架构的特例。单个代理可以表示为工具。在这种情况下，主管代理使用工具调用 LLM 来决定要调用哪些代理工具，以及要传递给这些代理的参数。
+
+常用例子就是将chain封装为工具然后提供给主智能体
+
+该架构的显著优势就是代码简单，适用子智能体功能较为单一且无需要将对应的输出在状态中更新（无持久化要求）
+
+##### Hierarchical架构
+
+该架构其实是supervisor的延伸拓展，主智能体连接的从节点变为了图（即为引入子图）便于实现更加复杂的任务流程
