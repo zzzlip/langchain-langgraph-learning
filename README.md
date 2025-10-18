@@ -1,4 +1,4 @@
-# 带你深入了解LangChain+Langgraph  (v0.3)
+# 带你深入了解LangChain+Langgraph的学习文档笔记  (v0.3)
 
 ## 目录
 
