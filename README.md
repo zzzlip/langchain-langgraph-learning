@@ -4,7 +4,7 @@
 
 - [1. 引言](#1-引言)
 - [2. 什么是Langchain和Langgraph](#2-什么是langchain和langgraph)
-- [3. 组件一：基础三大件 (Base)](#3-组件一基础三大件-base)
+- [3. 基础三大件 (Base)](#3-基础三大件-base)
   - [3.1. 模型调用 (Language Models)](#31-模型调用-language-models)
   - [3.2. 提示模板 (Prompt Templates)](#32-提示模板-prompt-templates)
     - [基础提示词模版](#基础提示词模版)
@@ -15,7 +15,7 @@
   - [3.3. 输出解析器 (Output Parsers)](#33-输出解析器-output-parsers)
     - [自定义输出解析器](#自定义输出解析器)
     - [输出修复](#输出修复)
-- [4. 组件三：链 (Chains)](#4-组件三链-chains)
+- [4. 链 (Chains)](#4-链-chains)
   - [4.1 基础概念](#41-基础概念)
     - [Runnable](#runnable)
     - [RunnableLambda](#runnablelambda)
@@ -30,7 +30,7 @@
     - [Langgraph](#langgraph)
   - [4.4 循环链-Langgraph特有](#44-循环链-langgraph特有)
     - [自我修正与反思](#自我修正与反思)
-- [5. 组件四：记忆 (Memory)](#5-组件四记忆-memory)
+- [5. 记忆 (Memory)](#5-记忆-memory)
   - [5.1. 短期记忆](#51-短期记忆)
     - [添加短期记忆-节点](#添加短期记忆-节点)
     - [添加短期记忆-工具](#添加短期记忆-工具)
@@ -45,7 +45,7 @@
     - [获取当前对话状态](#获取当前对话状态)
     - [获取整个过程对话历史状态记录](#获取整个过程对话历史状态记录)
     - [删除线程的所有检查点](#删除线程的所有检查点)
-- [6. 组件五：代理 (Agents)](#6-组件五代理-agents)
+- [6. 代理 (Agents)](#6-代理-agents)
   - [6.1. 工具](#61-工具)
     - [工具基本参数](#工具基本参数)
     - [创建方法](#创建方法)
@@ -63,20 +63,48 @@
     - [核心概念](#核心概念)
     - [state（状态）](#state状态)
       - [常见type](#常见type)
+      - [pydantic介绍-Field](#pydantic介绍-field)
+      - [dataclass介绍](#dataclass介绍)
       - [Reducers (归纳函数)](#reducers-归纳函数)
       - [Messages (消息)](#messages-消息)
       - [状态实例讲解](#状态实例讲解)
     - [Nodes (节点)](#nodes-节点)
     - [Edges (边)](#edges-边)
-    - [`Send` 和 `Command`](#send-和-command)
-    - [Runtime Context（运行时上下文 ）](#runtime-context运行时上下文-)
+    - [Send 和 Command](#send-和-command)
+    - [Runtime Context（运行时上下文 ）:](#runtime-context运行时上下文-)
   - [6.4 多智能体](#64-多智能体)
     - [转交机制](#转交机制)
       - [意图识别](#意图识别)
       - [节点移交](#节点移交)
+    - [子图](#子图)
+      - [概念](#概念)
+      - [优势](#优势)
+      - [构建方法](#构建方法)
+      - [数据传输](#数据传输)
     - [多智能体架构](#多智能体架构)
       - [Network-网络架构（Swarm-鸟群架构）](#network-网络架构swarm-鸟群架构)
       - [Supervisor架构](#supervisor架构)
+      - [Supervisor (tool-calling):](#supervisor-tool-calling)
+      - [Hierarchical架构](#hierarchical架构)
+- [7. 回调（callbacks）](#7-回调callbacks)
+  - [7.1 构造方式](#71-构造方式)
+  - [7.2 基本回调方法介绍](#72-基本回调方法介绍)
+    - [1. LLM 相关方法](#1-llm-相关方法)
+      - [on_llm_start(serialized: Dict[str, Any], prompts: List[str], **kwargs: Any) -> Any](#on_llm_startserialized-dictstr-any-prompts-liststr-kwargs-any---any)
+      - [on_llm_new_token(token: str, **kwargs: Any) -> Any](#on_llm_new_tokentoken-str-kwargs-any---any)
+      - [on_llm_end(response: LLMResult, **kwargs: Any) -> Any](#on_llm_endresponse-llmresult-kwargs-any---any)
+      - [on_llm_error(error: Union[Exception, KeyboardInterrupt], **kwargs: Any) -> Any](#on_llm_errorerror-unionexception-keyboardinterrupt-kwargs-any---any)
+    - [2. Chain 相关方法 ](#2-chain-相关方法)
+      - [on_chain_start(serialized: Dict[str, Any], inputs: Dict[str, Any], **kwargs: Any) -> Any](#on_chain_startserialized-dictstr-any-inputs-dictstr-any-kwargs-any---any)
+      - [on_chain_end(outputs: Dict[str, Any], **kwargs: Any) -> Any](#on_chain_endoutputs-dictstr-any-kwargs-any---any)
+      - [on_chain_error(error: Union[Exception, KeyboardInterrupt], **kwargs: Any) -> Any](#on_chain_errorerror-unionexception-keyboardinterrupt-kwargs-any---any)
+    - [3. 工具相关方法 ](#3-工具相关方法)
+      - [on_tool_start(serialized: Dict[str, Any], input_str: str, **kwargs: Any) -> Any](#on_tool_startserialized-dictstr-any-input_str-str-kwargs-any---any)
+      - [on_tool_end(output: str, **kwargs: Any) -> Any](#on_tool_endoutput-str-kwargs-any---any)
+      - [on_tool_error(error: Union[Exception, KeyboardInterrupt], **kwargs: Any) -> Any](#on_tool_errorerror-unionexception-keyboardinterrupt-kwargs-any---any)
+    - [4. Agent 及思考过程相关方法 ](#4-agent-及思考过程相关方法)
+      - [on_agent_action(action: AgentAction, **kwargs: Any) -> Any](#on_agent_actionaction-agentaction-kwargs-any---any)
+      - [on_agent_finish(finish: AgentFinish, **kwargs: Any) -> Any](#on_agent_finishfinish-agentfinish-kwargs-any---any)
 
 
 ---
@@ -3621,79 +3649,79 @@ configured_subgraph = subgraph_app.with_config({
 
 ------
 
-##### 2. Chain 相关方法 (Methods for Chains)
+##### 2. Chain 相关方法 
 
 这组方法用于监控一个“链”（Chain）的执行。在 LangGraph 中，每个节点（Node）的执行也被视为一个 Chain 的执行。
 
-- #### on_chain_start(serialized: Dict[str, Any], inputs: Dict[str, Any], **kwargs: Any) -> Any
+###### on_chain_start(serialized: Dict[str, Any], inputs: Dict[str, Any], **kwargs: Any) -> Any
 
-  - **触发时机**: 在一个 Chain（或 LangGraph 节点）即将开始执行**之前**触发。
-  - **参数**:
-    - serialized: 描述这个 Chain 的配置信息的字典。
-    - inputs: 一个字典，包含了传入这个 Chain 的输入数据。
-  - **用途**: 记录 Chain 的入口数据、追踪一个复杂流程的开始。在 LangGraph 中，可以通过 kwargs 中的 name 参数识别是哪个节点开始了。
+- **触发时机**: 在一个 Chain（或 LangGraph 节点）即将开始执行**之前**触发。
+- **参数**:
+  - serialized: 描述这个 Chain 的配置信息的字典。
+  - inputs: 一个字典，包含了传入这个 Chain 的输入数据。
+- **用途**: 记录 Chain 的入口数据、追踪一个复杂流程的开始。在 LangGraph 中，可以通过 kwargs 中的 name 参数识别是哪个节点开始了。
 
-- #### on_chain_end(outputs: Dict[str, Any], **kwargs: Any) -> Any
+###### on_chain_end(outputs: Dict[str, Any], **kwargs: Any) -> Any
 
-  - **触发时机**: 在一个 Chain（或 LangGraph 节点）执行完成**之后**触发。
-  - **参数**:
-    - outputs: 一个字典，包含了这个 Chain 返回的最终输出数据。
-  - **用途**: 记录 Chain 的最终结果、将结果存入数据库、触发后续流程。
+- **触发时机**: 在一个 Chain（或 LangGraph 节点）执行完成**之后**触发。
+- **参数**:
+  - outputs: 一个字典，包含了这个 Chain 返回的最终输出数据。
+- **用途**: 记录 Chain 的最终结果、将结果存入数据库、触发后续流程。
 
-- #### on_chain_error(error: Union[Exception, KeyboardInterrupt], **kwargs: Any) -> Any
+###### on_chain_error(error: Union[Exception, KeyboardInterrupt], **kwargs: Any) -> Any
 
-  - **触发时机**: 如果在 Chain 的执行过程中（但不是在 LLM 或 Tool 的特定错误中）发生了未被捕获的错误，此方法会被触发。
-  - **用途**: 捕获和记录整个流程级别的失败。
+- **触发时机**: 如果在 Chain 的执行过程中（但不是在 LLM 或 Tool 的特定错误中）发生了未被捕获的错误，此方法会被触发。
+- **用途**: 捕获和记录整个流程级别的失败。
 
 ------
 
 
 
-##### 3. 工具相关方法 (Methods for Tools)
+##### 3. 工具相关方法 
 
 这组方法用于监控 Agent 使用工具（Tools）的情况。
 
-- #### on_tool_start(serialized: Dict[str, Any], input_str: str, **kwargs: Any) -> Any
+###### on_tool_start(serialized: Dict[str, Any], input_str: str, **kwargs: Any) -> Any
 
-  - **触发时机**: 在一个 Agent 即将调用一个工具**之前**触发。
-  - **参数**:
-    - serialized: 描述这个工具的配置信息的字典（如工具的名称和描述）。
-    - input_str: Agent 决定传递给这个工具的输入字符串。
-  - **用途**: 记录 Agent 尝试使用哪个工具以及用了什么输入、在工具执行前对输入进行安全检查。
+- **触发时机**: 在一个 Agent 即将调用一个工具**之前**触发。
+- **参数**:
+  - serialized: 描述这个工具的配置信息的字典（如工具的名称和描述）。
+  - input_str: Agent 决定传递给这个工具的输入字符串。
+- **用途**: 记录 Agent 尝试使用哪个工具以及用了什么输入、在工具执行前对输入进行安全检查。
 
-- #### on_tool_end(output: str, **kwargs: Any) -> Any
+###### on_tool_end(output: str, **kwargs: Any) -> Any
 
-  - **触发时机**: 在工具执行完成并返回结果**之后**触发。
-  - **参数**:
-    - output: 工具执行后返回的字符串结果。
-  - **用途**: 记录工具的执行结果，以便调试 Agent 的决策过程。
+- **触发时机**: 在工具执行完成并返回结果**之后**触发。
+- **参数**:
+  - output: 工具执行后返回的字符串结果。
+- **用途**: 记录工具的执行结果，以便调试 Agent 的决策过程。
 
-- #### on_tool_error(error: Union[Exception, KeyboardInterrupt], **kwargs: Any) -> Any
+###### on_tool_error(error: Union[Exception, KeyboardInterrupt], **kwargs: Any) -> Any
 
-  - **触发时机**: 如果在工具的执行过程中发生了错误，此方法会被触发。
-  - **用途**: 记录失败的工具调用，这对于调试为什么 Agent 表现异常非常关键。
+- **触发时机**: 如果在工具的执行过程中发生了错误，此方法会被触发。
+- **用途**: 记录失败的工具调用，这对于调试为什么 Agent 表现异常非常关键。
 
 ------
 
 
 
-##### 4. Agent 及思考过程相关方法 (Methods for Agents)
+##### 4. Agent 及思考过程相关方法 
 
 这组方法专门用于深入观察 Agent 的“思考”过程。
 
-- #### on_agent_action(action: AgentAction, **kwargs: Any) -> Any
+###### on_agent_action(action: AgentAction, **kwargs: Any) -> Any
 
-  - **触发时机**: 当 Agent 的 LLM 部分决定要采取一个行动（即调用一个工具）时触发。这发生在 on_tool_start 之前。
-  - **参数**:
-    - action: 一个 AgentAction 对象，它包含了 Agent 决定调用的工具名称（action.tool）、工具输入（action.tool_input）以及 LLM 的原始思考过程或日志（action.log）。
-  - **用途**: 这是观察 Agent "内心独白" 的核心方法。你可以用它来记录 Agent 的推理链（Chain of Thought），理解它为什么会选择这个工具。
+- **触发时机**: 当 Agent 的 LLM 部分决定要采取一个行动（即调用一个工具）时触发。这发生在 on_tool_start 之前。
+- **参数**:
+  - action: 一个 AgentAction 对象，它包含了 Agent 决定调用的工具名称（action.tool）、工具输入（action.tool_input）以及 LLM 的原始思考过程或日志（action.log）。
+- **用途**: 这是观察 Agent "内心独白" 的核心方法。你可以用它来记录 Agent 的推理链（Chain of Thought），理解它为什么会选择这个工具。
 
-- #### on_agent_finish(finish: AgentFinish, **kwargs: Any) -> Any
+###### on_agent_finish(finish: AgentFinish, **kwargs: Any) -> Any
 
-  - **触发时机**: 当 Agent 决定不再调用工具，而是要直接给用户一个最终答案时触发。
-  - **参数**:
-    - finish: 一个 AgentFinish 对象，它包含了最终的输出（finish.return_values）和 Agent 的最后思考过程（finish.log）。
-  - **用途**: 记录 Agent 的最终结论和它得出这个结论的理由。
+- **触发时机**: 当 Agent 决定不再调用工具，而是要直接给用户一个最终答案时触发。
+- **参数**:
+  - finish: 一个 AgentFinish 对象，它包含了最终的输出（finish.return_values）和 Agent 的最后思考过程（finish.log）。
+- **用途**: 记录 Agent 的最终结论和它得出这个结论的理由。
 
 ------
 
