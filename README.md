@@ -101,7 +101,7 @@ LangGraph 是 LangChain 的一个扩展模块，专注于构建状态化的、�
 
 总体上，LangChain 更适合初学者和简单应用，而 LangGraph 则增强了 LangChain 的能力，用于更复杂的 AI 系统构建。如果你刚入门，建议从 LangChain 开始学习，然后扩展到 LangGraph。
 
-## 3. 组件一：基础三大件 (Base)
+## 3. 基础三大件 (Base)
 
 这是与 LLM 直接交互的层。
 
@@ -456,7 +456,7 @@ result=retry_parser.parse_with_prompt(bad_response, prompt_value) ## 使用parse
 ```
 **特别注意调用方法的时候需要传入的是PromptValue 对象，而不是直接传入字符串或者template。**  
 
-## 4. 组件三：链 (Chains)
+## 4. 链 (Chains)
 
 链是将多个组件（如模型、提示、检索器）按顺序组合起来的核心
 ### 4.1 基础概念
@@ -1223,7 +1223,7 @@ AI 回答: 今天北京的天气信息无法获取，因为搜索权限被拒绝
 
 
 
-## 5. 组件四：记忆 (Memory)
+## 5. 记忆 (Memory)
 
 为了让对话能够持续，链和 Agent 需要记住之前的交互。在`langchain` v0.3版本之后，官方更加推荐使用`langgraph`进行记忆管理，所以下面我将使用`langgraph`进行讲解
 
@@ -1762,7 +1762,7 @@ checkpointer.delete_thread(thread_id)
 
 
 
-## 6. 组件五：代理 (Agents)
+## 6. 代理 (Agents)
 
 Agent 是 LangChain 中最强大的功能之一。它不遵循预设的链条，而是利用 LLM 的推理能力，动态地决定调用哪个**工具 (Tool)** 来解决问题。
 
@@ -3132,3 +3132,570 @@ def create_graph():
 ##### Hierarchical架构
 
 该架构其实是supervisor的延伸拓展，主智能体连接的从节点变为了图（即为引入子图）便于实现更加复杂的任务流程
+
+###### 代码场景：AI 投资分析公司
+
+这家公司的工作流程如下：
+
+1. **顶层主管 (CIO - Chief Investment Officer)**: 接收一个目标公司（例如，“分析一下NVIDIA的投资价值”）。CIO 不亲自做研究，它的职责是：
+   - 决定分析的顺序。是先看市场宏观环境，还是先看公司财务状况？
+   - 将任务分派给相应的专业团队。
+   - 在收到所有团队的报告后，综合所有信息，形成最终的投资建议。
+2. **市场分析团队 (Market Analyst Subgraph)**: 这是一个子图，专门负责：
+   - **任务**: 分析与该公司相关的宏观市场新闻和行业趋势。
+   - **工具**: 使用 Tavily 搜索引擎查找最新新闻。
+   - **产出**: 一份关于市场环境的简报。
+3. **财务分析团队 (Financial Analyst Subgraph)**: 这是另一个子图，专门负责：
+   - **任务**: 分析公司的财务报表（我们将用一个模拟工具来获取数据）。
+   - **工具**: 一个模拟的 get_financials 工具。
+   - **产出**: 一份关于公司财务健康状况的摘要。
+
+```python
+import os
+from typing import List, TypedDict, Annotated, Optional
+from langchain_openai import ChatOpenAI
+from langgraph.graph import StateGraph, END
+from langchain_community.tools.tavily_search import TavilySearchResults
+import json
+from base import llm
+
+tavily_tool = TavilySearchResults(max_results=3)
+
+
+# 模拟一个获取公司财务数据的工具
+def get_financial_data(company_name: str) -> dict:
+    """一个模拟的工具，用于获取公司的财务数据"""
+    print(f"---[财务工具]: 正在获取 {company_name} 的模拟财务数据...---")
+    if "nvidia" in company_name.lower():
+        return {
+            "revenue": "95B USD",
+            "net_income": "35B USD",
+            "p_e_ratio": 75,
+            "comment": "增长强劲，但估值较高。"
+        }
+    else:
+        return {
+            "revenue": "N/A",
+            "net_income": "N/A",
+            "p_e_ratio": "N/A",
+            "comment": "未找到该公司的数据。"
+        }
+
+
+# --- 2. 构建子图1: 市场分析团队 ---
+
+class MarketAnalysisState(TypedDict):
+    company_name: str
+    market_news: Optional[List[dict]]
+    market_summary: Optional[str]
+
+
+def search_market_news(state: MarketAnalysisState):
+    print("---[市场分析子图]: 正在搜索市场新闻...---")
+    results = tavily_tool.invoke(f"最新市场新闻和行业趋势关于 {state['company_name']}")
+    return {"market_news": results}
+
+
+def summarize_market_news(state: MarketAnalysisState):
+    print("---[市场分析子图]: 正在总结市场新闻...---")
+    prompt = f"你是一位市场分析师。请根据以下关于 {state['company_name']} 的新闻，总结市场情绪和关键行业趋势。\n\n新闻内容:\n{state['market_news']}"
+    response = llm.invoke(prompt)
+    return {"market_summary": response.content}
+
+
+def build_market_analyst_graph():
+    graph = StateGraph(MarketAnalysisState)
+    graph.add_node("searcher", search_market_news)
+    graph.add_node("summarizer", summarize_market_news)
+    graph.set_entry_point("searcher")
+    graph.add_edge("searcher", "summarizer")
+    graph.add_edge("summarizer", END)
+    return graph.compile()
+
+
+market_analyst_subgraph = build_market_analyst_graph()
+
+
+# --- 3. 构建子图2: 财务分析团队 ---
+
+class FinancialAnalysisState(TypedDict):
+    company_name: str
+    financial_data: Optional[dict]
+    financial_summary: Optional[str]
+
+
+def fetch_financials(state: FinancialAnalysisState):
+    print("---[财务分析子图]: 正在获取财务数据...---")
+    data = get_financial_data(state["company_name"])
+    return {"financial_data": data}
+
+
+def summarize_financials(state: FinancialAnalysisState):
+    print("---[财务分析子图]: 正在总结财务状况...---")
+    prompt = f"你是一位财务分析师。请根据以下 {state['company_name']} 的财务数据，生成一份简明的财务健康状况摘要。\n\n财务数据:\n{json.dumps(state['financial_data'], indent=2, ensure_ascii=False)}"
+    response = llm.invoke(prompt)
+    return {"financial_summary": response.content}
+
+
+def build_financial_analyst_graph():
+    graph = StateGraph(FinancialAnalysisState)
+    graph.add_node("fetcher", fetch_financials)
+    graph.add_node("summarizer", summarize_financials)
+    graph.set_entry_point("fetcher")
+    graph.add_edge("fetcher", "summarizer")
+    graph.add_edge("summarizer", END)
+    return graph.compile()
+
+
+financial_analyst_subgraph = build_financial_analyst_graph()
+
+
+# --- 4. 构建主图: CIO 主管 ---
+
+# 主管的状态需要包含所有子图可能返回的字段，以便自动合并
+class InvestmentState(TypedDict):
+    company_name: str
+    # 子图的输出
+    market_summary: Optional[str]
+    financial_summary: Optional[str]
+    # 主管的决策和最终结果
+    next_task: str
+    final_recommendation: str
+
+
+def cio_supervisor(state: InvestmentState):
+    """顶层主管，决定下一步做什么"""
+    print("---[CIO 主管]: 正在评估当前进度并决定下一步...---")
+
+    # 检查已完成的工作
+    completed_tasks = []
+    if state.get("market_summary"):
+        completed_tasks.append("市场分析")
+    if state.get("financial_summary"):
+        completed_tasks.append("财务分析")
+
+    company_name = state["company_name"]
+
+    prompt = f"""
+    你是一家投资公司的首席投资官(CIO)。你的任务是分析 {company_name} 的投资价值。
+    你手下有两个团队：市场分析团队和财务分析团队。
+
+    当前已完成的分析报告: {', '.join(completed_tasks) if completed_tasks else '无'}
+
+    根据当前进度，请决定下一步行动。你的选项是：
+    1. "analyze_market": 派发任务给市场分析团队。
+    2. "analyze_financials": 派发任务给财务分析团队。
+    3. "generate_recommendation": 当两个团队的报告都完成后，综合信息形成最终投资建议。
+
+    如果市场分析报告和财务分析报告都已完成，你应该选择 "generate_recommendation"。
+    否则，请选择一个尚未完成的分析任务。
+
+    请只返回你选择的下一步行动的名称（例如: "analyze_market"）。
+    """
+    response = llm.invoke(prompt)
+    next_task = response.content.strip()
+    print(f"---[CIO 主管]: 决策 -> {next_task}---")
+    return {"next_task": next_task}
+
+
+def generate_final_recommendation(state: InvestmentState):
+    """综合所有报告，生成最终建议"""
+    print("---[CIO 主管]: 正在综合所有报告，生成最终投资建议...---")
+    prompt = f"""
+    你是一家投资公司的首席投资官(CIO)。你已经收到了关于 {state['company_name']} 的所有分析报告。
+
+    市场分析报告:
+    {state['market_summary']}
+
+    财务分析报告:
+    {state['financial_summary']}
+
+    请基于以上所有信息，撰写一份最终的投资建议。请明确给出“买入”、“持有”或“卖出”的建议，并阐述你的核心理由。
+    """
+    response = llm.invoke(prompt)
+    return {"final_recommendation": response.content}
+
+
+# 条件路由
+def route_tasks(state: InvestmentState):
+    next_task = state.get("next_task")
+    if next_task == "analyze_market":
+        return "market_team"
+    elif next_task == "analyze_financials":
+        return "financial_team"
+    elif next_task == "generate_recommendation":
+        return "generate_final_report"
+    # 如果出现意外情况，可以设定一个默认或结束路径
+    return END
+
+
+# --- 5. 组装分层架构 ---
+workflow = StateGraph(InvestmentState)
+
+# 添加主管节点
+workflow.add_node("cio_supervisor", cio_supervisor)
+# 直接将子图作为节点添加
+workflow.add_node("market_team", market_analyst_subgraph)
+workflow.add_node("financial_team", financial_analyst_subgraph)
+# 添加最终报告节点
+workflow.add_node("generate_final_report", generate_final_recommendation)
+
+# 设置入口
+workflow.set_entry_point("cio_supervisor")
+
+# 添加条件路由
+workflow.add_conditional_edges(
+    "cio_supervisor",
+    route_tasks,
+    {
+        "market_team": "market_team",
+        "financial_team": "financial_team",
+        "generate_final_report": "generate_final_report"
+    }
+)
+
+# 子图完成后，流程应该回到主管那里，让主管重新决策
+workflow.add_edge("market_team", "cio_supervisor")
+workflow.add_edge("financial_team", "cio_supervisor")
+
+# 最终报告生成后，流程结束
+workflow.add_edge("generate_final_report", END)
+
+# 编译最终的图
+graph = workflow.compile()
+
+
+
+```
+
+
+
+###### 工作流程图
+
+![](/Users/zmh/Desktop/program/未命名文件夹/Hierarchical_workflow_graph.png)
+
+
+
+### 7. 回调（callbacks）
+
+#### 7.1 构造方式
+
+| 特性         | 请求时间回调 (Request Time Callback)                         | 构造函数回调 (Constructor Callback)                          |
+| ------------ | ------------------------------------------------------------ | ------------------------------------------------------------ |
+| **定义方式** | 在 invoke(), stream() 等方法中通过 config 参数传入           | 在创建对象（如 LLM, Chain）时作为构造函数参数传入            |
+| **作用域**   | **全局性**：从传入的那个对象开始，向下覆盖其所有子组件       | **局部性**：仅限于被绑定的那一个对象实例                     |
+| **继承性**   | **会继承**：父组件的回调会自动应用到所有子组件               | **不继承**：只对自己负责，不影响父组件或兄弟组件             |
+| **生命周期** | **临时的**：仅对单次请求有效                                 | **永久的**：与对象实例的生命周期相同                         |
+| **适用场景** | 1. **调试**：想看某一次请求的完整执行路径。<br>2. **单次请求的日志记录**：为某次特定调用添加追踪ID。<br>3. **流式输出**：为前端实现打字机效果。 | 1. **全局监控**：想统计某个 LLM 模型被调用了多少次。<br>2. **成本计算**：给 LLM 绑定一个专门计算 Token 消耗的回调。<br>3. **设置默认行为**：创建一个总是会记录日志的 LLM 实例，供多处复用。 |
+
+简单来说：
+
+- 想**临时、全面地追踪一次调用**，用**请求时间回调**。
+- 想**永久、定点地监控某个组件**，用**构造函数回调**。
+
+```
+#构造时间回调
+chain.invoke(
+    {"number": 42},
+    config={"callbacks": [handler]} # 注意这里！
+)
+# 当构造了时间回调，那么这个回调就会适用于所有的Runnable，如果你的chain是复合的那么子chain也会适用
+
+
+#构造函数回调
+#无论你是想为llm，chain，node 或者 graph你都可以使用 with_config 方法 
+#其核心本质是Runnable对象可以无缝衔接回调（编译好的图其实也是一个Runnable对象）
+
+ #为llm构造
+llm_with_config=lllm.with_config( "callbacks": [handler]) 
+
+#为chain构造
+chain_with_constructor_callback = base_chain.with_config({
+    "callbacks": [handler]
+}) 
+
+#为某个图中的node构造
+#call_model是一个准备做节点的函数
+configured_call_model = RunnableLambda(call_model).with_config({
+    "callbacks": [agent_node_handler]
+})
+workflow_node_specific.add_node("agent", configured_call_model)
+
+
+
+#为图构造
+subgraph_app = deep_dive_workflow.compile()# 编译好的图
+configured_subgraph = subgraph_app.with_config({
+    "callbacks": [handler]
+})
+#常用于只想要监控某个子图而主图不受影响
+
+```
+
+
+
+#### 7.2 基本回调方法介绍
+
+下面是利用**BaseCallbackHandler**进行自定义回调封装方法的介绍
+
+##### 1. LLM 相关方法 
+
+这是最常用的一组方法，用于监控语言模型的调用。
+
+###### on_llm_start(serialized: Dict[str, Any], prompts: List[str], **kwargs: Any) -> Any
+
+- **触发时机**: 在即将向一个大语言模型（LLM）发送请求**之前**触发。
+
+- **参数**:
+
+  - serialized: 一个字典，描述了这个 LLM 的配置信息（如模型名称、temperature 等）。
+  - prompts: 一个字符串列表，包含了即将发送给 LLM 的所有提示（Prompts）。即使只有一个 prompt，它也会被包装在一个列表中。
+
+- **用途**: 记录发送给模型的原始提示、在调用前进行数据验证、或启动一个计时器来计算 LLM 的响应时间。
+
+- **实例代码**
+
+  ```python
+  from base import  llm
+  
+  from langchain_core.callbacks import BaseCallbackHandler
+  from langchain_core.messages import HumanMessage
+  import time
+  class LLMStartHandler(BaseCallbackHandler):
+      def on_llm_start(self, serialized, prompts, **kwargs):
+          print("--- LLM 调用开始 ---")
+          print(f"模型配置: {serialized}")
+          print(f"发送的提示: {prompts}")
+          
+  
+  # 初始化模型时，传入构造函数回调
+  llm.invoke([('system','你是一位编程专家'),HumanMessage(content="写一句关于编程的名言")],config={'callbacks': [LLMStartHandler()]})
+  ```
+
+  ```
+  --- LLM 调用开始 ---
+  模型配置: {'lc': 1, 'type': 'constructor', 'id': ['langchain', 'chat_models', 'openai', 'ChatOpenAI'], 'kwargs': {'model_name': 'deepseek-chat', 'temperature': 0.7, 'openai_api_key': {'lc': 1, 'type': 'secret', 'id': ['OPENAI_API_KEY']}, 'openai_api_base': 'https://api.deepseek.com', 'streaming': True}, 'name': 'ChatOpenAI'}
+  发送的提示: ['System: 你是一位编程专家\nHuman: 写一句关于编程的名言']
+  ```
+
+  
+
+###### on_llm_new_token(token: str, **kwargs: Any) -> Any
+
+- **触发时机**: 当 LLM **流式（streaming）**返回响应时，每当有一个新的 token（词元）产生，此方法就会被触发一次。
+
+- **参数**:
+
+  - token: 新产生的那个字符串 token。
+
+- **用途**: 这是实现“打字机效果”的关键。你可以在这个方法里将新的 token 发送到前端界面进行实时显示，与此同时当该chain深埋在代码中比如是某一个子代理也想要实现与前端的流式交互那么可以在该机制中使用队列存储token块（属于后端知识我就不过多讲述）。
+
+- 实例代码
+
+  ```python
+  from langchain_openai import ChatOpenAI
+  from langchain_core.callbacks import BaseCallbackHandler
+  
+  class TokenStreamHandler(BaseCallbackHandler):
+      def on_llm_new_token(self, token: str, **kwargs) -> None:
+          # 使用 end="" 和 flush=True 来实现单行连续打印
+          print(token, end="", flush=True)
+  
+  # 在请求时传入回调，并调用 .stream() 方法
+  handler = TokenStreamHandler()
+  model = ChatOpenAI()
+  # 注意这里使用的是 stream()
+  _ = model.stream("写一个关于太空探索的短故事", config={"callbacks": [handler]})
+  print("\n--- 流式输出结束 ---")
+  ```
+
+  ```
+  从前，在... (逐字打印) ...星辰大海。
+  --- 流式输出结束 ---
+  ```
+
+  
+
+###### on_llm_end(response: LLMResult, **kwargs: Any) -> Any
+
+- **触发时机**: 在 LLM 完成生成并返回完整的响应**之后**触发。
+
+- **参数**:
+
+  - response: 一个 LLMResult 对象。这个对象非常重要，它包含了 LLM 返回的所有信息，其中 response.generations 包含了生成的文本,以及相关的token消耗
+
+- **用途**: 记录 LLM 的完整输出、计算和记录 token 消耗与成本、结束之前启动的计时器。
+
+- **实例代码**
+
+  ```python
+  from pprint import pprint
+  
+  from langchain_core.messages import AIMessage
+  
+  from base import  llm
+  from langchain_openai import ChatOpenAI
+  from langchain_core.callbacks import BaseCallbackHandler
+  from langchain_core.outputs import LLMResult, ChatGeneration
+  
+  
+  class LLMEndHandler(BaseCallbackHandler):
+      def on_llm_end(self, response: LLMResult, **kwargs):
+          print("\n--- LLM 调用结束 ---")
+          pprint(response.generations[0][0].message.usage_metadata)
+          print(f"返回的 Generation: {response.generations[0][0].text[:50]}...")
+  
+  
+  model = llm.with_config({'callbacks':[LLMEndHandler()]})
+  model.invoke("中国的首都是哪里？")
+  
+  ```
+
+  ```
+   --- LLM 调用结束 ---
+  {'input_token_details': {'cache_read': 0},
+   'input_tokens': 9,
+   'output_token_details': {},
+   'output_tokens': 50,
+   'total_tokens': 59}
+  返回的 Generation: 中国的首都是**北京**。北京不仅是中国的政治中心，也是文化、科技和国际交往的重要枢纽。作为一座历史...
+  
+  
+  ```
+
+  **注意事项**
+
+  LLMResult结构：List[List[Generation]]
+
+  ### 第一层 (最外层) 
+
+  **这层列表对应你发送给 LLM 的 “提示 (Prompts) 列表”。**
+
+  - 它的长度等于你**一次性**发送给 LLM 的提示数量。
+  - 如果你使用 .invoke() 方法，你通常只发送 **1** 个提示，所以最外层列表的长度就是 1。
+  - 如果你使用 .batch() 方法，你可以一次性发送多个提示（例如 ["中国的首都是哪里？", "法国的首都是哪里？"]），那么最外层列表的长度就会与你发送的提示数量相等（在这个例子中是 2）。
+  - **简单来说：外层列表的第 i 个元素，就是对你输入的第 i 个提示的所有回应。**
+
+  
+
+  ### 第二层 (内层) 列表: List[Generation]
+
+  **这层列表对应为 “单个提示” 生成的 “候选答案 (Generations/Completions) 列表”。**
+
+  - 你可以通过在模型初始化时设置 n 参数，来要求 LLM 为一个提示生成多个不同的、并行的答案。例如 ChatOpenAI(n=3)。
+  - 如果你不设置 n，它默认等于 **1**。这就是为什么在绝大多数情况下，你看到的内层列表长度都只有 1。
+  - 这个功能非常有用，比如当你需要从多个创意中挑选一个最好的，或者在进行一些复杂推理时探索不同的可能性。
+  - **简单来说：内层列表包含了对单个提示的 n 个不同版本的回答。**
+
+###### on_llm_error(error: Union[Exception, KeyboardInterrupt], **kwargs: Any) -> Any
+
+- **触发时机**: 如果在调用 LLM 的过程中发生了错误（例如 API 连接失败、密钥无效等），此方法会被触发。
+
+- **用途**: 记录调用失败的错误信息、发送告警通知等。
+
+- **实例代码**
+
+  ```python
+  
+  from langchain_core.callbacks import BaseCallbackHandler
+  
+  class FallbackMonitor(BaseCallbackHandler):
+      def on_llm_error(self, error: Exception, **kwargs):
+          # 这里的代码不会中断流程，它只是在“旁边”记录信息
+          print("\n🚨 [监控回调] 检测到 LLM 错误！")
+          print(f"   错误信息: {str(error)[:100]}...")
+          print("   系统将自动尝试备用模型。")
+  
+  
+  # 在调用时，传入我们的监控回调
+  handler = FallbackMonitor()
+  model_with_fallback = flaky_model.with_fallbacks(fallbacks=[fallback_model])#在这里可以传入备用模型
+  chain = prompt | model_with_fallback | StrOutputParser()
+  
+  print("--- 再次调用，这次带有监控回调 ---")
+  result = chain.invoke({"topic": "创新"}, config={"callbacks": [handler]})
+  
+  print("\n✅ 调用成功！")
+  print(f"结果: {result}")
+  ```
+
+------
+
+##### 2. Chain 相关方法 (Methods for Chains)
+
+这组方法用于监控一个“链”（Chain）的执行。在 LangGraph 中，每个节点（Node）的执行也被视为一个 Chain 的执行。
+
+- #### on_chain_start(serialized: Dict[str, Any], inputs: Dict[str, Any], **kwargs: Any) -> Any
+
+  - **触发时机**: 在一个 Chain（或 LangGraph 节点）即将开始执行**之前**触发。
+  - **参数**:
+    - serialized: 描述这个 Chain 的配置信息的字典。
+    - inputs: 一个字典，包含了传入这个 Chain 的输入数据。
+  - **用途**: 记录 Chain 的入口数据、追踪一个复杂流程的开始。在 LangGraph 中，可以通过 kwargs 中的 name 参数识别是哪个节点开始了。
+
+- #### on_chain_end(outputs: Dict[str, Any], **kwargs: Any) -> Any
+
+  - **触发时机**: 在一个 Chain（或 LangGraph 节点）执行完成**之后**触发。
+  - **参数**:
+    - outputs: 一个字典，包含了这个 Chain 返回的最终输出数据。
+  - **用途**: 记录 Chain 的最终结果、将结果存入数据库、触发后续流程。
+
+- #### on_chain_error(error: Union[Exception, KeyboardInterrupt], **kwargs: Any) -> Any
+
+  - **触发时机**: 如果在 Chain 的执行过程中（但不是在 LLM 或 Tool 的特定错误中）发生了未被捕获的错误，此方法会被触发。
+  - **用途**: 捕获和记录整个流程级别的失败。
+
+------
+
+
+
+##### 3. 工具相关方法 (Methods for Tools)
+
+这组方法用于监控 Agent 使用工具（Tools）的情况。
+
+- #### on_tool_start(serialized: Dict[str, Any], input_str: str, **kwargs: Any) -> Any
+
+  - **触发时机**: 在一个 Agent 即将调用一个工具**之前**触发。
+  - **参数**:
+    - serialized: 描述这个工具的配置信息的字典（如工具的名称和描述）。
+    - input_str: Agent 决定传递给这个工具的输入字符串。
+  - **用途**: 记录 Agent 尝试使用哪个工具以及用了什么输入、在工具执行前对输入进行安全检查。
+
+- #### on_tool_end(output: str, **kwargs: Any) -> Any
+
+  - **触发时机**: 在工具执行完成并返回结果**之后**触发。
+  - **参数**:
+    - output: 工具执行后返回的字符串结果。
+  - **用途**: 记录工具的执行结果，以便调试 Agent 的决策过程。
+
+- #### on_tool_error(error: Union[Exception, KeyboardInterrupt], **kwargs: Any) -> Any
+
+  - **触发时机**: 如果在工具的执行过程中发生了错误，此方法会被触发。
+  - **用途**: 记录失败的工具调用，这对于调试为什么 Agent 表现异常非常关键。
+
+------
+
+
+
+##### 4. Agent 及思考过程相关方法 (Methods for Agents)
+
+这组方法专门用于深入观察 Agent 的“思考”过程。
+
+- #### on_agent_action(action: AgentAction, **kwargs: Any) -> Any
+
+  - **触发时机**: 当 Agent 的 LLM 部分决定要采取一个行动（即调用一个工具）时触发。这发生在 on_tool_start 之前。
+  - **参数**:
+    - action: 一个 AgentAction 对象，它包含了 Agent 决定调用的工具名称（action.tool）、工具输入（action.tool_input）以及 LLM 的原始思考过程或日志（action.log）。
+  - **用途**: 这是观察 Agent "内心独白" 的核心方法。你可以用它来记录 Agent 的推理链（Chain of Thought），理解它为什么会选择这个工具。
+
+- #### on_agent_finish(finish: AgentFinish, **kwargs: Any) -> Any
+
+  - **触发时机**: 当 Agent 决定不再调用工具，而是要直接给用户一个最终答案时触发。
+  - **参数**:
+    - finish: 一个 AgentFinish 对象，它包含了最终的输出（finish.return_values）和 Agent 的最后思考过程（finish.log）。
+  - **用途**: 记录 Agent 的最终结论和它得出这个结论的理由。
+
+------
+
+
+
